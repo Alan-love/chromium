@@ -107,7 +107,6 @@ import org.chromium.chrome.browser.native_page.NativePageAssassin;
 import org.chromium.chrome.browser.navigation_predictor.NavigationPredictorBridge;
 import org.chromium.chrome.browser.night_mode.WebContentsDarkModeController;
 import org.chromium.chrome.browser.ntp.NewTabPageUma;
-import org.chromium.chrome.browser.ntp.cards.promo.HomepagePromoVariationManager;
 import org.chromium.chrome.browser.omnibox.OmniboxFocusReason;
 import org.chromium.chrome.browser.paint_preview.StartupPaintPreviewHelper;
 import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomizations;
@@ -160,6 +159,7 @@ import org.chromium.chrome.browser.vr.VrModuleProvider;
 import org.chromium.chrome.features.start_surface.StartSurface;
 import org.chromium.chrome.features.start_surface.StartSurfaceConfiguration;
 import org.chromium.chrome.features.start_surface.StartSurfaceState;
+import org.chromium.chrome.features.start_surface.StartSurfaceUserData;
 import org.chromium.components.browser_ui.util.BrowserControlsVisibilityDelegate;
 import org.chromium.components.browser_ui.util.ComposedBrowserControlsVisibilityDelegate;
 import org.chromium.components.embedder_support.util.UrlConstants;
@@ -1704,8 +1704,6 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
 
             ChromeSurveyController.initialize(mTabModelSelectorImpl);
 
-            HomepagePromoVariationManager.getInstance().tagSyntheticHomepagePromoSeenGroup();
-
             DefaultBrowserPromoUtils.maybeRecordOutcomeOnStart();
 
             if (mStartSurfaceSupplier.get() != null && mOverviewShownOnStart) {
@@ -1860,8 +1858,12 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
             return true;
         }
 
-        // If we are in overview mode and not a tablet, then leave overview mode on back.
-        if (mOverviewModeController.overviewVisible() && !isTablet()) {
+        // If we are in the tab switcher mode (not in the Start surface homepage) and not a tablet,
+        // then leave tab switcher mode on back.
+        if (mOverviewModeController.overviewVisible() && !isTablet()
+                && (mStartSurfaceSupplier.get() == null
+                        || mStartSurfaceSupplier.get().getController().getStartSurfaceState()
+                                == StartSurfaceState.SHOWN_TABSWITCHER)) {
             mOverviewModeController.hideOverview(true);
             return true;
         }
@@ -1878,11 +1880,22 @@ public class ChromeTabbedActivity extends ChromeActivity<ChromeActivityComponent
             return true;
         }
 
-        // If the current tab is created from the start surface, then the back button should close
-        // the tab and go back to the start surface.
-        if (type == TabLaunchType.FROM_START_SURFACE) {
-            getCurrentTabModel().closeTab(currentTab);
-            showOverview(StartSurfaceState.SHOWING_PREVIOUS);
+        // If we aren't in the overview mode, we handle the Tab with launchType
+        // TabLaunchType.FROM_START_SURFACE here.
+        if (!mOverviewModeController.overviewVisible()
+                && type == TabLaunchType.FROM_START_SURFACE) {
+            if (StartSurfaceUserData.getKeepTab(currentTab)) {
+                // If the current tab is created from the start surface with the keepTab property,
+                // shows the Start surface Homepage to prevent a loop between the current tab and
+                // previous overview mode. Once in the Start surface, it will close Chrome if back
+                // button is tapped again.
+                showOverview(StartSurfaceState.SHOWING_HOMEPAGE);
+            } else {
+                // Otherwise, clicking the back button should close the tab and go back to the
+                // previous overview mode.
+                getCurrentTabModel().closeTab(currentTab);
+                showOverview(StartSurfaceState.SHOWING_PREVIOUS);
+            }
             return true;
         }
 
